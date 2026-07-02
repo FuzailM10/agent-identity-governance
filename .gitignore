@@ -1,0 +1,22 @@
+# --- Secrets & env (security-first: real secrets NEVER get committed) ---
+.env
+*.env
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- Node / Next.js (dashboard) ---
+node_modules/
+.next/
+dist/
+out/
+
+# --- Vercel ---
+.vercel
+
+# --- OS ---
+.DS_Store
