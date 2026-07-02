@@ -1,0 +1,53 @@
+"""Database tables for the control plane.
+
+Phase 1 introduces the two identities at the core of the accountability thesis:
+
+- `Owner`  — a *human* who is accountable for an agent.
+- `Agent`  — a *non-human* (AI) identity, permanently linked to one Owner.
+
+Every Agent carries a SPIFFE-style ID (spiffe://...). SPIFFE is the industry
+standard for giving workloads (non-humans) a verifiable identity — using its
+naming here is a deliberate nod to how real systems do this.
+"""
+import uuid
+from datetime import datetime
+
+from sqlalchemy import ForeignKey, String, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .db import Base
+
+
+def _uuid() -> str:
+    return str(uuid.uuid4())
+
+
+class Owner(Base):
+    __tablename__ = "owners"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    agents: Mapped[list["Agent"]] = relationship(back_populates="owner")
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    purpose: Mapped[str] = mapped_column(String, nullable=False)
+
+    # Verifiable workload identity, e.g. spiffe://aig/agent/<uuid>
+    spiffe_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+
+    # Lifecycle: active -> suspended -> killed (kill switch lands in Phase 6).
+    status: Mapped[str] = mapped_column(String, default="active", nullable=False)
+
+    # The permanent link to a human. This is the accountability chain.
+    owner_id: Mapped[str] = mapped_column(ForeignKey("owners.id"), nullable=False)
+    owner: Mapped["Owner"] = relationship(back_populates="agents")
+
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
