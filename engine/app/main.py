@@ -8,6 +8,7 @@ Phase 1 — Identity:
 """
 import uuid
 
+import jwt
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from . import models, schemas
 from .db import Base, engine, get_db
+from .tokens import decode_token, issue_capability_token
 
 # Create tables on startup (fine for a demo; real apps use migrations/Alembic).
 Base.metadata.create_all(bind=engine)
@@ -104,3 +106,69 @@ def get_attribution(agent_id: str, db: Session = Depends(get_db)):
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found.")
     return {"agent": agent, "owner": agent.owner}
+
+
+# ---------------------------------------------------------------------------
+# Grants & capability tokens (Phase 2: just-in-time scoped access)
+# ---------------------------------------------------------------------------
+@app.post("/agents/{agent_id}/grants", response_model=schemas.TokenIssued, status_code=201)
+def issue_grant(agent_id: str, payload: schemas.GrantCreate, db: Session = Depends(get_db)):
+    """Grant an agent scoped, time-boxed access and mint its capability token."""
+    agent = db.get(models.Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    if agent.status != "active":
+        raise HTTPException(status_code=403, detail=f"Agent is '{agent.status}', cannot be granted access.")
+
+    grant_id = str(uuid.uuid4())
+    token, _issued, exp = issue_capability_token(
+        grant_id=grant_id,
+        agent=agent,
+        scope=payload.scope,
+        constraints=payload.constraints,
+        ttl_seconds=payload.ttl_seconds,
+    )
+    grant = models.Grant(
+        id=grant_id,
+        agent_id=agent.id,
+        scope=payload.scope,
+        constraints=payload.constraints,
+        expires_at=exp,
+    )
+    db.add(grant)
+    db.commit()
+    db.refresh(grant)
+    return {
+        "grant": grant,
+        "token": token,
+        "expires_at": exp,
+        "note": f"JIT access '{payload.scope}' granted for {payload.ttl_seconds}s — auto-expires.",
+    }
+
+
+@app.get("/agents/{agent_id}/grants", response_model=list[schemas.GrantOut])
+def list_grants(agent_id: str, db: Session = Depends(get_db)):
+    return db.query(models.Grant).filter_by(agent_id=agent_id).all()
+
+
+@app.post("/tokens/introspect", response_model=schemas.IntrospectResult)
+def introspect_token(payload: schemas.IntrospectRequest, db: Session = Depends(get_db)):
+    """Validate a capability token: is it still active, and what does it allow?
+
+    Checks (in order): signature valid -> not expired -> grant not revoked.
+    This is the 'token introspection' pattern from OAuth.
+    """
+    try:
+        claims = decode_token(payload.token)
+    except jwt.ExpiredSignatureError:
+        return {"active": False, "reason": "token expired — JIT access timed out", "claims": None}
+    except jwt.InvalidTokenError as exc:
+        return {"active": False, "reason": f"invalid token: {exc}", "claims": None}
+
+    grant = db.get(models.Grant, claims.get("jti"))
+    if grant is None:
+        return {"active": False, "reason": "grant no longer exists", "claims": None}
+    if grant.revoked:
+        return {"active": False, "reason": "grant was revoked", "claims": None}
+
+    return {"active": True, "reason": "valid", "claims": claims}

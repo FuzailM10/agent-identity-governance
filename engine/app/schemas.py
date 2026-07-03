@@ -46,3 +46,41 @@ class AttributionChain(BaseModel):
     """Answers the project's core question: 'who is behind this agent?'"""
     agent: AgentOut
     owner: OwnerOut
+
+
+# --- Grants & capability tokens (Phase 2: JIT access) ---
+class GrantCreate(BaseModel):
+    scope: str                       # what the agent may do, e.g. "invoice:approve"
+    constraints: dict = {}           # limits, e.g. {"max_amount": 5000}
+    ttl_seconds: int = 300           # how long the access lives (just-in-time)
+
+
+class GrantOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    agent_id: str
+    scope: str
+    constraints: dict
+    revoked: bool
+    issued_at: datetime
+    expires_at: datetime
+
+
+class TokenIssued(BaseModel):
+    """What you get back when access is granted: the record + the actual token."""
+    grant: GrantOut
+    token: str
+    expires_at: datetime
+    note: str
+
+
+class IntrospectRequest(BaseModel):
+    token: str
+
+
+class IntrospectResult(BaseModel):
+    """Is this token still valid, and what does it allow? (OAuth 'introspection')"""
+    active: bool
+    reason: str
+    claims: dict | None = None

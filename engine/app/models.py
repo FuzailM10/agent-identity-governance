@@ -12,7 +12,7 @@ naming here is a deliberate nod to how real systems do this.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, func
+from sqlalchemy import JSON, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -51,3 +51,26 @@ class Agent(Base):
     owner: Mapped["Owner"] = relationship(back_populates="agents")
 
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    grants: Mapped[list["Grant"]] = relationship(back_populates="agent")
+
+
+class Grant(Base):
+    """A just-in-time, scoped, time-boxed grant of access to one agent.
+
+    Each grant is the DB record behind one capability token (JWT). The token
+    self-expires via its `exp`; `revoked` lets us kill it early (Phase 6).
+    """
+    __tablename__ = "grants"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), nullable=False)
+
+    scope: Mapped[str] = mapped_column(String, nullable=False)          # e.g. "invoice:approve"
+    constraints: Mapped[dict] = mapped_column(JSON, default=dict)       # e.g. {"max_amount": 5000}
+
+    revoked: Mapped[bool] = mapped_column(default=False)
+    issued_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+
+    agent: Mapped["Agent"] = relationship(back_populates="grants")
