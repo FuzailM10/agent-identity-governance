@@ -9,6 +9,11 @@ __pycache__/
 .venv/
 venv/
 
+# --- Local databases (never commit data) ---
+*.db
+*.sqlite
+*.sqlite3
+
 # --- Node / Next.js (dashboard) ---
 node_modules/
 .next/
