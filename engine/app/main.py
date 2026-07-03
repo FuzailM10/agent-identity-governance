@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from . import models, policy, schemas
+from . import audit, models, policy, schemas
 from .db import Base, engine, get_db
 from .tokens import decode_token, issue_capability_token
 
@@ -189,7 +189,12 @@ def broker(payload: schemas.BrokerRequest, db: Session = Depends(get_db)):
     """The gate every agent action passes through: ALLOW / STEP_UP / DENY."""
     claims, reason = validate_token(payload.token, db)
     if claims is None:
-        # A bad/expired/revoked token is an automatic DENY.
+        # A bad/expired/revoked token is an automatic DENY — but still audited.
+        audit.record_event(
+            db, agent_id=None, owner_id=None, grant_id=None,
+            action=payload.action, context=payload.context,
+            decision=policy.DENY, reason=reason,
+        )
         return {"decision": policy.DENY, "reason": reason}
 
     result = policy.decide(claims, payload.action, payload.context)
@@ -214,6 +219,17 @@ def broker(payload: schemas.BrokerRequest, db: Session = Depends(get_db)):
         db.refresh(approval)
         response["approval_id"] = approval.id
 
+    # Every brokered decision is written to the tamper-evident audit trail.
+    audit.record_event(
+        db,
+        agent_id=claims.get("agent_id"),
+        owner_id=claims.get("owner_id"),
+        grant_id=claims.get("jti"),
+        action=payload.action,
+        context=payload.context,
+        decision=result.decision,
+        reason=result.reason,
+    )
     return response
 
 
@@ -236,3 +252,17 @@ def resolve_approval(approval_id: str, payload: schemas.ApprovalResolve, db: Ses
     db.commit()
     db.refresh(approval)
     return approval
+
+
+# ---------------------------------------------------------------------------
+# Audit trail (Phase 4): tamper-evident, hash-chained log
+# ---------------------------------------------------------------------------
+@app.get("/audit", response_model=list[schemas.AuditEventOut])
+def list_audit(db: Session = Depends(get_db)):
+    return db.query(models.AuditEvent).order_by(models.AuditEvent.seq.asc()).all()
+
+
+@app.get("/audit/verify", response_model=schemas.AuditVerifyResult)
+def verify_audit(db: Session = Depends(get_db)):
+    """Recompute the hash chain and report whether it's intact."""
+    return audit.verify_chain(db)

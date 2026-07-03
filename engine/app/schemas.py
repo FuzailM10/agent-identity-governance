@@ -118,3 +118,28 @@ class ApprovalOut(BaseModel):
 class ApprovalResolve(BaseModel):
     approve: bool               # True = human approves the exception
     decided_by: str             # who approved (owner name/id)
+
+
+# --- Audit trail (Phase 4) ---
+class AuditEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    seq: int
+    ts: str
+    agent_id: str | None
+    owner_id: str | None
+    grant_id: str | None
+    action: str
+    context: dict
+    decision: str
+    reason: str
+    prev_hash: str
+    hash: str
+
+
+class AuditVerifyResult(BaseModel):
+    valid: bool
+    events: int | None = None
+    head_hash: str | None = None
+    broken_at_seq: int | None = None
+    reason: str | None = None

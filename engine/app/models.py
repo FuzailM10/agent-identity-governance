@@ -93,3 +93,26 @@ class Approval(Base):
     status: Mapped[str] = mapped_column(String, default="pending")  # pending|approved|denied
     decided_by: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class AuditEvent(Base):
+    """One tamper-evident entry in the hash-chained audit log.
+
+    `hash` = SHA-256 of this row's fields + `prev_hash`. See app/audit.py.
+    """
+    __tablename__ = "audit_events"
+
+    seq: Mapped[int] = mapped_column(primary_key=True)  # explicit order, 1..N
+    ts: Mapped[str] = mapped_column(String, nullable=False)  # ISO8601, hashed as-is
+
+    agent_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    owner_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    grant_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    decision: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+
+    prev_hash: Mapped[str] = mapped_column(String, nullable=False)
+    hash: Mapped[str] = mapped_column(String, nullable=False)
