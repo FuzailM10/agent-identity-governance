@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from . import models, schemas
+from . import models, policy, schemas
 from .db import Base, engine, get_db
 from .tokens import decode_token, issue_capability_token
 
@@ -151,24 +151,88 @@ def list_grants(agent_id: str, db: Session = Depends(get_db)):
     return db.query(models.Grant).filter_by(agent_id=agent_id).all()
 
 
+def validate_token(token: str, db: Session):
+    """Shared check: signature -> expiry -> grant exists -> not revoked.
+
+    Returns (claims, "valid") on success, or (None, reason) on failure.
+    """
+    try:
+        claims = decode_token(token)
+    except jwt.ExpiredSignatureError:
+        return None, "token expired — JIT access timed out"
+    except jwt.InvalidTokenError as exc:
+        return None, f"invalid token: {exc}"
+
+    grant = db.get(models.Grant, claims.get("jti"))
+    if grant is None:
+        return None, "grant no longer exists"
+    if grant.revoked:
+        return None, "grant was revoked"
+    return claims, "valid"
+
+
 @app.post("/tokens/introspect", response_model=schemas.IntrospectResult)
 def introspect_token(payload: schemas.IntrospectRequest, db: Session = Depends(get_db)):
     """Validate a capability token: is it still active, and what does it allow?
 
-    Checks (in order): signature valid -> not expired -> grant not revoked.
     This is the 'token introspection' pattern from OAuth.
     """
-    try:
-        claims = decode_token(payload.token)
-    except jwt.ExpiredSignatureError:
-        return {"active": False, "reason": "token expired — JIT access timed out", "claims": None}
-    except jwt.InvalidTokenError as exc:
-        return {"active": False, "reason": f"invalid token: {exc}", "claims": None}
+    claims, reason = validate_token(payload.token, db)
+    return {"active": claims is not None, "reason": reason, "claims": claims}
 
-    grant = db.get(models.Grant, claims.get("jti"))
-    if grant is None:
-        return {"active": False, "reason": "grant no longer exists", "claims": None}
-    if grant.revoked:
-        return {"active": False, "reason": "grant was revoked", "claims": None}
 
-    return {"active": True, "reason": "valid", "claims": claims}
+# ---------------------------------------------------------------------------
+# Policy broker (Phase 3): every agent action is brokered here first
+# ---------------------------------------------------------------------------
+@app.post("/broker", response_model=schemas.BrokerDecision)
+def broker(payload: schemas.BrokerRequest, db: Session = Depends(get_db)):
+    """The gate every agent action passes through: ALLOW / STEP_UP / DENY."""
+    claims, reason = validate_token(payload.token, db)
+    if claims is None:
+        # A bad/expired/revoked token is an automatic DENY.
+        return {"decision": policy.DENY, "reason": reason}
+
+    result = policy.decide(claims, payload.action, payload.context)
+    response = {
+        "decision": result.decision,
+        "reason": result.reason,
+        "agent_id": claims.get("agent_id"),
+        "owner_id": claims.get("owner_id"),
+    }
+
+    # STEP_UP creates a pending human-approval record.
+    if result.decision == policy.STEP_UP:
+        approval = models.Approval(
+            agent_id=claims["agent_id"],
+            grant_id=claims["jti"],
+            action=payload.action,
+            context=payload.context,
+            reason=result.reason,
+        )
+        db.add(approval)
+        db.commit()
+        db.refresh(approval)
+        response["approval_id"] = approval.id
+
+    return response
+
+
+@app.get("/approvals", response_model=list[schemas.ApprovalOut])
+def list_approvals(db: Session = Depends(get_db)):
+    return db.query(models.Approval).all()
+
+
+@app.post("/approvals/{approval_id}/resolve", response_model=schemas.ApprovalOut)
+def resolve_approval(approval_id: str, payload: schemas.ApprovalResolve, db: Session = Depends(get_db)):
+    """A human owner approves or denies a stepped-up action."""
+    approval = db.get(models.Approval, approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found.")
+    if approval.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Already {approval.status}.")
+
+    approval.status = "approved" if payload.approve else "denied"
+    approval.decided_by = payload.decided_by
+    db.commit()
+    db.refresh(approval)
+    return approval

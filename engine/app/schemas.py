@@ -84,3 +84,37 @@ class IntrospectResult(BaseModel):
     active: bool
     reason: str
     claims: dict | None = None
+
+
+# --- Policy broker & human approvals (Phase 3) ---
+class BrokerRequest(BaseModel):
+    token: str
+    action: str                 # what the agent wants to do, e.g. "invoice:approve"
+    context: dict = {}          # request details, e.g. {"amount": 50000}
+
+
+class BrokerDecision(BaseModel):
+    decision: str               # ALLOW | DENY | STEP_UP
+    reason: str
+    agent_id: str | None = None
+    owner_id: str | None = None
+    approval_id: str | None = None   # set when STEP_UP creates a pending approval
+
+
+class ApprovalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    agent_id: str
+    grant_id: str
+    action: str
+    context: dict
+    reason: str
+    status: str
+    decided_by: str | None
+    created_at: datetime
+
+
+class ApprovalResolve(BaseModel):
+    approve: bool               # True = human approves the exception
+    decided_by: str             # who approved (owner name/id)
