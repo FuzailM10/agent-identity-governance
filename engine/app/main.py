@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from . import audit, models, policy, schemas
+from . import audit, models, policy, risk, schemas
 from .db import Base, engine, get_db
 from .tokens import decode_token, issue_capability_token
 
@@ -197,13 +197,21 @@ def broker(payload: schemas.BrokerRequest, db: Session = Depends(get_db)):
         )
         return {"decision": policy.DENY, "reason": reason}
 
-    result = policy.decide(claims, payload.action, payload.context)
+    agent = db.get(models.Agent, claims.get("agent_id"))
+    current_risk = agent.risk_score if agent else 0
+    result = policy.decide(claims, payload.action, payload.context, current_risk)
     response = {
         "decision": result.decision,
         "reason": result.reason,
         "agent_id": claims.get("agent_id"),
         "owner_id": claims.get("owner_id"),
     }
+
+    # Update the agent's risk score based on this outcome, feeding future decisions.
+    if agent:
+        agent.risk_score = risk.next_score(agent.risk_score, result.decision)
+        db.commit()
+        response["risk_score"] = agent.risk_score
 
     # STEP_UP creates a pending human-approval record.
     if result.decision == policy.STEP_UP:

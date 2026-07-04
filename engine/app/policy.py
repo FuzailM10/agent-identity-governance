@@ -12,6 +12,8 @@ you'd call out to OPA instead. Same inputs, same outputs.
 """
 from dataclasses import dataclass
 
+from . import risk
+
 ALLOW = "ALLOW"
 DENY = "DENY"
 STEP_UP = "STEP_UP"
@@ -23,10 +25,20 @@ class Decision:
     reason: str
 
 
-def decide(claims: dict, action: str, context: dict) -> Decision:
-    granted_scope = claims.get("scope")
-    constraints = claims.get("constraints", {})
+def decide(claims: dict, action: str, context: dict, risk_score: int = 0) -> Decision:
+    base = _base_decision(claims.get("scope"), claims.get("constraints", {}), action, context)
 
+    # Risk feeds policy: a high-risk agent loses its automatic ALLOW and must
+    # get a human in the loop, even for actions that are normally fine.
+    if base.decision == ALLOW and risk_score >= risk.HIGH_RISK_THRESHOLD:
+        return Decision(
+            STEP_UP,
+            f"would allow, but agent risk {risk_score} >= {risk.HIGH_RISK_THRESHOLD} — human approval required",
+        )
+    return base
+
+
+def _base_decision(granted_scope, constraints, action, context) -> Decision:
     # 1) The action must fall within the scope the agent was actually granted.
     #    (An invoice-approver trying to write to a DB fails here -> DENY.)
     if action != granted_scope:

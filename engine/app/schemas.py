@@ -38,6 +38,7 @@ class AgentOut(BaseModel):
     purpose: str
     spiffe_id: str
     status: str
+    risk_score: int
     owner_id: str
     created_at: datetime
 
@@ -99,6 +100,7 @@ class BrokerDecision(BaseModel):
     agent_id: str | None = None
     owner_id: str | None = None
     approval_id: str | None = None   # set when STEP_UP creates a pending approval
+    risk_score: int | None = None    # the agent's risk score after this decision
 
 
 class ApprovalOut(BaseModel):

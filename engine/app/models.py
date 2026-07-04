@@ -43,8 +43,11 @@ class Agent(Base):
     # Verifiable workload identity, e.g. spiffe://aig/agent/<uuid>
     spiffe_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
 
-    # Lifecycle: active -> suspended -> killed (kill switch lands in Phase 6).
+    # Lifecycle: active -> killed (kill switch, Phase 6).
     status: Mapped[str] = mapped_column(String, default="active", nullable=False)
+
+    # Live risk score (0..100); rises on risky behavior, feeds the policy engine.
+    risk_score: Mapped[int] = mapped_column(default=0, nullable=False)
 
     # The permanent link to a human. This is the accountability chain.
     owner_id: Mapped[str] = mapped_column(ForeignKey("owners.id"), nullable=False)
