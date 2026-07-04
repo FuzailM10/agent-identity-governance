@@ -108,6 +108,33 @@ def get_attribution(agent_id: str, db: Session = Depends(get_db)):
     return {"agent": agent, "owner": agent.owner}
 
 
+@app.post("/agents/{agent_id}/kill", response_model=schemas.AgentOut)
+def kill_agent(agent_id: str, db: Session = Depends(get_db)):
+    """Kill switch: instantly deactivate an agent and revoke ALL its grants.
+
+    After this, any action the agent attempts (even with an unexpired token)
+    is denied at the broker, because every grant is now revoked.
+    """
+    agent = db.get(models.Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+
+    agent.status = "killed"
+    revoked = 0
+    for grant in db.query(models.Grant).filter_by(agent_id=agent_id, revoked=False).all():
+        grant.revoked = True
+        revoked += 1
+    db.commit()
+    db.refresh(agent)
+
+    audit.record_event(
+        db, agent_id=agent.id, owner_id=agent.owner_id, grant_id=None,
+        action="agent:kill", context={"grants_revoked": revoked},
+        decision="KILLED", reason="kill switch activated — agent deactivated, all grants revoked",
+    )
+    return agent
+
+
 # ---------------------------------------------------------------------------
 # Grants & capability tokens (Phase 2: just-in-time scoped access)
 # ---------------------------------------------------------------------------
