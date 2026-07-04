@@ -6,11 +6,13 @@ Phase 1 — Identity:
     permanently links it to its Owner.
   * Trace the attribution chain: agent -> owner.
 """
+import os
 import uuid
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -34,6 +36,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+_STATIC = os.path.join(os.path.dirname(__file__), "static")
+
+
+@app.get("/", include_in_schema=False)
+def dashboard():
+    """The visual dashboard (the 'face' of the control plane)."""
+    return FileResponse(os.path.join(_STATIC, "index.html"))
 
 
 @app.get("/health")

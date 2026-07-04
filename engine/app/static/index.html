@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent Identity Governance</title>
+<style>
+  :root {
+    --bg:#0b1020; --panel:#151c34; --panel2:#1c2547; --line:#2a3355;
+    --text:#e8ecf8; --muted:#9aa6c8; --accent:#6ea8fe;
+    --allow:#2ecc71; --stepup:#f1c40f; --deny:#e74c3c; --kill:#c0392b;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  header { padding:20px; border-bottom:1px solid var(--line); }
+  h1 { margin:0; font-size:20px; }
+  h1 span { color:var(--accent); }
+  .sub { color:var(--muted); font-size:13px; margin-top:4px; }
+  .wrap { max-width:1000px; margin:0 auto; padding:18px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:760px){ .grid{ grid-template-columns:1fr; } }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; }
+  .card h2 { margin:0 0 12px; font-size:14px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); }
+  button { font-size:14px; font-weight:600; color:#fff; background:var(--panel2);
+    border:1px solid var(--line); border-radius:10px; padding:10px 12px; cursor:pointer; margin:4px 4px 0 0; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#06122e; border-color:var(--accent); }
+  button.kill { background:var(--kill); border-color:var(--kill); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .agentline { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+  .pill { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line); }
+  .pill.active { color:var(--allow); border-color:var(--allow); }
+  .pill.killed { color:var(--deny); border-color:var(--deny); }
+  .meter { height:12px; background:#0c1330; border:1px solid var(--line); border-radius:999px; overflow:hidden; margin-top:10px; }
+  .meter > div { height:100%; width:0%; background:linear-gradient(90deg,var(--allow),var(--stepup),var(--deny)); transition:width .4s; }
+  .risknum { font-size:13px; color:var(--muted); margin-top:6px; }
+  .log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; }
+  .log .row { padding:8px 10px; border:1px solid var(--line); border-radius:9px; margin-bottom:6px; background:var(--panel2); }
+  .tag { font-weight:700; padding:1px 7px; border-radius:6px; margin-right:8px; }
+  .ALLOW{ color:var(--allow);} .STEP_UP{ color:var(--stepup);} .DENY{ color:var(--deny);} .KILLED{ color:var(--deny);}
+  .audit { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .audit td,.audit th { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  .audit th { color:var(--muted); font-weight:600; }
+  .hash { font-family:ui-monospace,monospace; color:var(--muted); }
+  .verify { margin-top:10px; font-size:13px; }
+  .ok{ color:var(--allow);} .bad{ color:var(--deny);}
+  .hint { color:var(--muted); font-size:12px; margin-top:6px; }
+</style>
+</head>
+<body>
+<header><div class="wrap" style="padding-bottom:0">
+  <h1>Agent Identity <span>Governance</span></h1>
+  <div class="sub">A control plane that governs, audits & controls AI agents — like a human employee.</div>
+</div></header>
+
+<div class="wrap">
+  <div class="card" style="margin-bottom:16px">
+    <h2>1 · Set up the demo</h2>
+    <button class="primary" id="setup">Register agent + issue JIT access</button>
+    <div class="hint" id="setupHint">Creates a human owner, an AI agent, and a scoped token: <b>approve invoices ≤ $5,000</b>.</div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>2 · Agent tries actions</h2>
+      <button id="a4k" disabled>Approve $4,000 invoice</button>
+      <button id="a50k" disabled>Approve $50,000 invoice</button>
+      <button id="adb" disabled>Write to prod database</button>
+      <br>
+      <button class="kill" id="kill" disabled>🔴 KILL SWITCH</button>
+      <div class="hint">Watch the decision + risk react live. After kill, the next action dies instantly.</div>
+
+      <h2 style="margin-top:16px">Live decisions</h2>
+      <div class="log" id="log"><div class="hint">No actions yet.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Agent status</h2>
+      <div class="agentline">
+        <div id="agentName" class="muted">— not set up —</div>
+        <span class="pill" id="agentStatus">—</span>
+      </div>
+      <div class="meter"><div id="riskbar"></div></div>
+      <div class="risknum" id="risknum">risk score: —</div>
+
+      <h2 style="margin-top:18px">Tamper-evident audit trail</h2>
+      <table class="audit"><thead><tr><th>#</th><th>decision</th><th>action</th><th>hash</th></tr></thead>
+        <tbody id="audit"><tr><td colspan="4" class="hint">empty</td></tr></tbody></table>
+      <button id="verify" style="margin-top:10px">Verify chain integrity</button>
+      <div class="verify" id="verifyOut"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = location.origin;
+let TOKEN=null, AGENT_ID=null;
+
+const $ = id => document.getElementById(id);
+const j = async (m,u,b) => (await fetch(API+u,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined})).json();
+
+function logDecision(d){
+  const box=$('log');
+  if(box.querySelector('.hint')) box.innerHTML='';
+  const row=document.createElement('div'); row.className='row';
+  row.innerHTML=`<span class="tag ${d.decision}">${d.decision}</span>${d.reason}`;
+  box.prepend(row);
+}
+
+async function refresh(){
+  if(!AGENT_ID) return;
+  const a=await j('GET','/agents/'+AGENT_ID);
+  $('agentName').textContent=a.name+'  ·  '+a.purpose;
+  const st=$('agentStatus'); st.textContent=a.status; st.className='pill '+a.status;
+  $('riskbar').style.width=a.risk_score+'%';
+  $('risknum').textContent='risk score: '+a.risk_score+' / 100'+(a.risk_score>=70?'  ⚠ high risk':'');
+  const ev=await j('GET','/audit');
+  $('audit').innerHTML = ev.length? ev.map(e=>
+     `<tr><td>${e.seq}</td><td class="${e.decision}">${e.decision}</td><td>${e.action}</td><td class="hash">${e.hash.slice(0,10)}…</td></tr>`
+   ).join('') : '<tr><td colspan="4" class="hint">empty</td></tr>';
+}
+
+$('setup').onclick=async()=>{
+  $('setup').disabled=true; $('setupHint').textContent='Setting up…';
+  const owner=await j('POST','/owners',{name:'Muhammad Fuzail',email:'fuzail+'+Date.now()+'@example.com'});
+  const agent=await j('POST','/agents',{name:'invoice-approver-bot',purpose:'Approve invoices ≤ $5k',owner_id:owner.id});
+  AGENT_ID=agent.id;
+  const g=await j('POST','/agents/'+AGENT_ID+'/grants',{scope:'invoice:approve',constraints:{max_amount:5000},ttl_seconds:3600});
+  TOKEN=g.token;
+  ['a4k','a50k','adb','kill'].forEach(b=>$(b).disabled=false);
+  $('setupHint').innerHTML='✅ Agent live with a scoped token. Now try the actions →';
+  refresh();
+};
+
+async function act(action,context){ const d=await j('POST','/broker',{token:TOKEN,action,context}); logDecision(d); refresh(); }
+$('a4k').onclick =()=>act('invoice:approve',{amount:4000});
+$('a50k').onclick=()=>act('invoice:approve',{amount:50000});
+$('adb').onclick =()=>act('db:write',{target:'prod-db'});
+$('kill').onclick=async()=>{ await j('POST','/agents/'+AGENT_ID+'/kill'); logDecision({decision:'KILLED',reason:'kill switch activated — all grants revoked'}); refresh(); };
+$('verify').onclick=async()=>{
+  const v=await j('GET','/audit/verify');
+  $('verifyOut').innerHTML = v.valid
+    ? `<span class="ok">✅ chain intact — ${v.events} events, nothing tampered</span>`
+    : `<span class="bad">🚨 TAMPERED at event #${v.broken_at_seq} — ${v.reason}</span>`;
+};
+</script>
+</body>
+</html>
