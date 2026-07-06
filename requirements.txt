@@ -1,0 +1,6 @@
+# Root requirements — used by Vercel's Python runtime to build the deployment.
+# (Local dev uses engine/.venv; see engine/requirements.txt.)
+fastapi
+sqlalchemy
+psycopg2-binary
+pyjwt
