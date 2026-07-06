@@ -15,6 +15,12 @@ DATABASE_URL = os.getenv(
     "postgresql+psycopg2://postgres:postgres@db:5432/aig",
 )
 
+# Some managed providers (Neon, Heroku, ...) give a "postgres://" URL, but
+# SQLAlchemy 2.x requires the "postgresql://" scheme. Normalize it so whatever
+# Neon hands us works without editing.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 # pool_pre_ping avoids "server closed the connection" errors after idle time.
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
