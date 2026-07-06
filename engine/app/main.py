@@ -21,7 +21,12 @@ from .db import Base, engine, get_db
 from .tokens import decode_token, issue_capability_token
 
 # Create tables on startup (fine for a demo; real apps use migrations/Alembic).
-Base.metadata.create_all(bind=engine)
+# Wrapped so import never hard-fails at build time before DB env vars are set
+# (e.g. during Vercel's build step); it runs again on the first real cold start.
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as exc:  # pragma: no cover
+    print(f"[startup] table creation deferred: {exc}")
 
 app = FastAPI(
     title="Agent Identity Governance — Control Plane",
